@@ -5,6 +5,28 @@ use strict;
 
 use Compress::Zlib;
 
+# Subroutine that attempts to uncompress swf data passed to it
+sub uncompress_flash_contents {
+    # Give arguments a name
+    my ($flashContents) = @_;
+  
+    # 'unpack' SWF structure
+    my ($SWFText, $SWFVersion, $SWFSize, $packedSWF) = unpack("A3 c V a*", $flashContents);
+  
+    # Check for compressed identifier
+    if ($SWFText ne "CWS") {
+        return undef;
+    }
+  
+    # Do uncompress
+    my $unpackedSWF = Compress::Zlib::uncompress($packedSWF) 
+        or return undef;
+        
+    # Return repack of header and uncompressed data
+    pack("A3 c V a*", "FWS", $SWFVersion, $SWFSize, $unpackedSWF);
+}
+
+# Check script arguments
 if ($#ARGV != 0) {
   die "Usage:\n\tperl $0 <file>\n";
 }
@@ -13,36 +35,22 @@ if ($#ARGV != 0) {
 my $inputFileName = shift(@ARGV);
 my $outputFileName = $inputFileName . ".unp";
 
+# Read file contents into scalar
 open(INPUT, $inputFileName)
-  or die "Open file failure.";
+  or die "Failed to open file.";
 binmode(INPUT);
+my $fileContents = join("",<INPUT>);
+close(INPUT);
 
-# Read file contents
-my @fileContents = <INPUT>;
+# uncompress contents
+my $unpackedFile = &uncompress_flash_contents($fileContents)
+    or die "Error while uncompressing.";
 
-# Read/unpack SWF header
-my $SWFData = substr($fileContents[0],0,8);
-my ($SWFHeader, $SWFVersion, $SWFSize) = unpack("A3 c V", $SWFData);
-
-# Check for compressed header
-if ($SWFHeader ne "CWS") {
-  die "Not Compressed.\n";
-}
-
-# Strip SWF header from file contents
-$fileContents[0] = substr($fileContents[0],8);
-
-# Uncompress remaining data
-my $unpackedSWF = Compress::Zlib::uncompress(join("", @fileContents)) 
-  or die "Unpack Error";
-
-# Open and/or create new file
+# Create new file and write results
 open(NEWFILE, ">", $outputFileName) 
-  or die "Unable to create new file";
+  or die "Failed to create destination file";
 binmode(NEWFILE);
+print NEWFILE $unpackedFile;
+close(NEWFILE);
 
-# Repack header and write new SWF
-print NEWFILE pack("A3 c V", "FWS", $SWFVersion, $SWFSize);
-print NEWFILE $unpackedSWF;
-
-print "\nSuccessfully unpacked " . $inputFileName . " to " . $outputFileName . "\n";
+printf("\nSuccessfully unpacked %s to %s\n", $inputFileName, $outputFileName);
